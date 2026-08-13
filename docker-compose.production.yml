@@ -1,0 +1,60 @@
+services:
+  app:
+    image: ghcr.io/vas3k/taxhacker:latest
+    container_name: taxhacker_app
+    networks:
+      - taxhacker_network
+    environment:
+      - NODE_ENV=production
+      - BASE_URL=https://taxhacker.app
+      - SELF_HOSTED_MODE=false
+      - UPLOAD_PATH=/app/data/uploads
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:7331:7331"
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100M"
+        max-file: "3"
+
+  cron:
+    image: ghcr.io/vas3k/taxhacker:latest
+    container_name: taxhacker_cron
+    networks:
+      - taxhacker_network
+    environment:
+      - NODE_ENV=production
+      - BASE_URL=https://taxhacker.app
+      - SELF_HOSTED_MODE=false
+      - UPLOAD_PATH=/app/data/uploads
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./etc/crontab:/mnt/crontab:ro
+    restart: unless-stopped
+    depends_on:
+      - app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    security_opt:
+      - no-new-privileges:true
+    command: ["docker-cron-entrypoint.sh"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100M"
+        max-file: "3"
+
+networks:
+  taxhacker_network:
+    driver: bridge
