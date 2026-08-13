@@ -7,6 +7,46 @@ import sharp from "sharp"
 import config from "./config"
 import { getStaticDirectory, getUserUploadsDirectory, isEnoughStorageToUploadFile, safePathJoin, unsortedFilePath } from "./files"
 
+// Cap individual uploads at 50 MiB regardless of `bodySizeLimit`. Even if
+// the Next.js config allows 256 MiB, anything beyond a few MiB per file is
+// almost certainly abusive for an invoice/transaction app.
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+// Map of allowed mimetypes for unsorted ingest. Anything else is rejected
+// before we write bytes to disk so we don't end up serving attacker-uploaded
+// HTML/SVG/JS back to authenticated users.
+const ALLOWED_INGEST_MIMETYPES = new Set<string>([
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+  "image/tiff",
+])
+
+// Restrict the extensions we'll accept to the same set so that a malicious
+// filename like `evil.html` cannot be stored even if the mimetype is correct.
+const ALLOWED_INGEST_EXTENSIONS = new Set<string>([
+  "pdf",
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "heic",
+  "heif",
+  "tif",
+  "tiff",
+])
+
+function isAllowedIngest(input: { filename: string; mimetype: string }) {
+  if (ALLOWED_INGEST_MIMETYPES.has(input.mimetype)) {
+    const ext = path.extname(input.filename).slice(1).toLowerCase()
+    if (ext && ALLOWED_INGEST_EXTENSIONS.has(ext)) return true
+  }
+  return false
+}
+
 export async function uploadStaticImage(
   user: User,
   file: File,
@@ -17,6 +57,9 @@ export async function uploadStaticImage(
 ) {
   const uploadDirectory = getStaticDirectory(user)
 
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw Error("File is too large to upload")
+  }
   if (!isEnoughStorageToUploadFile(user, file.size)) {
     throw Error("Not enough space to upload the file")
   }
@@ -65,6 +108,12 @@ export async function ingestUnsortedFile(
   user: User,
   input: { buffer: Buffer; filename: string; mimetype: string; metadata?: Record<string, unknown> }
 ): Promise<PrismaFile> {
+  if (input.buffer.length > MAX_UPLOAD_BYTES) {
+    throw new Error("File is too large to upload")
+  }
+  if (!isAllowedIngest(input)) {
+    throw new Error("Unsupported file type")
+  }
   if (!isEnoughStorageToUploadFile(user, input.buffer.length)) {
     throw new Error("Not enough space to upload the file")
   }

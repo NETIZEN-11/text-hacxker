@@ -65,7 +65,7 @@ export async function createTransactionAction(
     revalidatePath("/transactions")
     return { success: true, data: newTransaction }
   } catch (error) {
-    console.error("Failed to create transaction:", error)
+    console.error("Failed to create transaction", error instanceof Error ? error.message : "unknown")
     return { success: false, error: "Failed to create transaction" }
   }
 }
@@ -88,7 +88,7 @@ export async function saveTransactionAction(
     revalidatePath("/transactions")
     return { success: true, data: transaction }
   } catch (error) {
-    console.error("Failed to update transaction:", error)
+    console.error("Failed to update transaction", error instanceof Error ? error.message : "unknown")
     return { success: false, error: "Failed to save transaction" }
   }
 }
@@ -108,7 +108,7 @@ export async function deleteTransactionAction(
 
     return { success: true, data: transaction }
   } catch (error) {
-    console.error("Failed to delete transaction:", error)
+    console.error("Failed to delete transaction", error instanceof Error ? error.message : "unknown")
     return { success: false, error: "Failed to delete transaction" }
   }
 }

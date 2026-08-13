@@ -35,7 +35,8 @@ export async function analyzeTransaction(
     const result = response.output
     const tokensUsed = response.tokensUsed || 0
 
-    console.log("LLM response:", result)
+    // Don't log the full LLM output — it can contain merchant names, totals,
+    // and other financial PII scraped from invoices.
     console.log("LLM tokens used:", tokensUsed)
 
     await updateFile(fileId, userId, { cachedParseResult: result })

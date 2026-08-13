@@ -1,8 +1,13 @@
+import { getCurrentUser } from "@/lib/auth"
 import config from "@/lib/config"
 import { PLANS, stripeClient } from "@/lib/stripe"
 import { NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
+  // Checkout must be tied to a logged-in user so the webhook can map
+  // the resulting Stripe customer to the right account.
+  const user = await getCurrentUser()
+
   const { searchParams } = new URL(request.url)
   const code = searchParams.get("code")
 
@@ -22,6 +27,8 @@ export async function POST(request: NextRequest) {
   try {
     const session = await stripeClient.checkout.sessions.create({
       billing_address_collection: "auto",
+      customer_email: user.email,
+      client_reference_id: user.id,
       line_items: [
         {
           price: plan.stripePriceId,
@@ -38,13 +45,12 @@ export async function POST(request: NextRequest) {
     })
 
     if (!session.url) {
-      console.log(session)
-      return NextResponse.json({ error: `Failed to create checkout session: ${session}` }, { status: 500 })
+      return NextResponse.json({ error: "Failed to create checkout session" }, { status: 500 })
     }
 
     return NextResponse.json({ session })
   } catch (error) {
-    console.error(error)
-    return NextResponse.json({ error: `Failed to create checkout session: ${error}` }, { status: 500 })
+    console.error("Stripe checkout error", error instanceof Error ? error.message : "unknown")
+    return NextResponse.json({ error: "Failed to create checkout session" }, { status: 500 })
   }
 }

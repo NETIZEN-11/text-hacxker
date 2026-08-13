@@ -5,6 +5,18 @@ import { getFileById } from "@/models/files"
 import fs from "fs/promises"
 import { NextResponse } from "next/server"
 
+// Browsers can execute attacker-controlled HTML/JS if we hand them back with
+// a `text/html` content-type. Force `application/octet-stream` for any mimetype
+// that could be rendered (HTML, XML, SVG) and require the file to be saved,
+// not rendered in the browser tab.
+const UNSAFE_DOWNLOAD_MIMETYPES = new Set([
+  "text/html",
+  "application/xhtml+xml",
+  "image/svg+xml",
+  "text/xml",
+  "application/xml",
+])
+
 export async function GET(request: Request, { params }: { params: Promise<{ fileId: string }> }) {
   const { fileId } = await params
   const user = await getCurrentUser()
@@ -25,21 +37,24 @@ export async function GET(request: Request, { params }: { params: Promise<{ file
     const fullFilePath = fullPathForFile(user, file)
     const isFileExists = await fileExists(fullFilePath)
     if (!isFileExists) {
-      return new NextResponse(`File not found on disk: ${file.path}`, { status: 404 })
+      return new NextResponse("File not found on disk", { status: 404 })
     }
 
     // Read file
     const fileBuffer = await fs.readFile(fullFilePath)
 
-    // Return file with proper content type and encoded filename
+    const safeMime = UNSAFE_DOWNLOAD_MIMETYPES.has(file.mimetype) ? "application/octet-stream" : file.mimetype
+    const dispositionType = safeMime === file.mimetype ? "inline" : "attachment"
+
     return new NextResponse(fileBuffer, {
       headers: {
-        "Content-Type": file.mimetype,
-          "Content-Disposition": `attachment; filename*=${encodeFilename(file.filename)}`,
-        },
+        "Content-Type": safeMime,
+        "Content-Disposition": `${dispositionType}; filename*=${encodeFilename(file.filename)}`,
+        "X-Content-Type-Options": "nosniff",
+      },
     })
   } catch (error) {
-    console.error("Error serving file:", error)
+    console.error("Error serving file", error instanceof Error ? error.message : "unknown")
     return new NextResponse("Internal Server Error", { status: 500 })
   }
 }

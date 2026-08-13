@@ -22,6 +22,16 @@ const FILES_CHUNK_SIZE = 50
 const PROGRESS_UPDATE_INTERVAL_MS = 2000 // 2 seconds
 const EXPORT_FILE_PATH_SEPARATOR = ";"
 
+// Excel/Sheets will execute any cell that starts with =, +, -, @, TAB or CR
+// as a formula. Prefix such values with a single quote so the value is shown
+// as text instead of being interpreted.
+const CSV_FORMULA_TRIGGERS = /^[=+\-@\t\r]/
+
+function escapeCsvFormula(value: unknown): unknown {
+  if (typeof value !== "string") return value
+  return CSV_FORMULA_TRIGGERS.test(value) ? `'${value}` : value
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const filters = Object.fromEntries(url.searchParams.entries()) as ExportFilters
@@ -81,9 +91,10 @@ export async function GET(request: Request) {
 
           const exportFieldSettings = EXPORT_AND_IMPORT_FIELD_MAP[field.code]
           if (exportFieldSettings && exportFieldSettings.export) {
-            row[field.code] = await exportFieldSettings.export(user.id, value)
+            const exported = await exportFieldSettings.export(user.id, value)
+            row[field.code] = escapeCsvFormula(exported)
           } else {
-            row[field.code] = value
+            row[field.code] = escapeCsvFormula(value)
           }
         }
         csvStream.write(row)

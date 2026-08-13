@@ -6,8 +6,8 @@ const ALGO = "aes-256-gcm"
 let cachedKey: { secret: string; key: Buffer } | undefined
 
 function getKey(): Buffer {
-  const secret = process.env.BETTER_AUTH_SECRET || "insecure-self-hosted-secret"
-  if (!secret) {
+  const secret = process.env.BETTER_AUTH_SECRET
+  if (!secret || secret.length < 16) {
     throw new Error("BETTER_AUTH_SECRET is required to encrypt/decrypt email credentials")
   }
   // scrypt is intentionally slow; memoize per secret so a batch sync derives the key once.

@@ -77,12 +77,18 @@ export async function syncServer(server: EmailServer, user: User, deps: SyncDeps
 
     return { serverId: server.id, processed, lastProcessedUid: maxUid, status: "connected" }
   } catch (error) {
+    // Log the full error server-side but return a generic message to the
+    // client so we don't leak hostnames, ports, or partial IMAP errors.
+    console.error(
+      `Email sync failed for server ${server.id} (${server.host})`,
+      error instanceof Error ? error.message : String(error)
+    )
     return {
       serverId: server.id,
       processed: 0,
       lastProcessedUid: server.lastProcessedUid,
       status: "error",
-      errorMessage: error instanceof Error ? error.message : String(error),
+      errorMessage: "Unable to connect to the email server. Check host, port, and credentials.",
     }
   }
 }

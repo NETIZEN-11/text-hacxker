@@ -13,10 +13,16 @@ const envSchema = z.object({
   MISTRAL_MODEL_NAME: z.string().default("mistral-medium-latest"),
   BETTER_AUTH_SECRET: z
     .string()
-    .min(16, "Auth secret must be at least 16 characters")
-    .default("please-set-your-key-here"),
+    .min(32, "Auth secret must be at least 32 characters")
+    .refine(
+      (v) => v !== "please-set-your-key-here" && !/^please[-_]?set/.test(v),
+      { message: "BETTER_AUTH_SECRET must be set to a strong value; the default placeholder is not allowed" }
+    ),
   DISABLE_SIGNUP: z.enum(["true", "false"]).default("false"),
-  RESEND_API_KEY: z.string().default("please-set-your-resend-api-key-here"),
+  RESEND_API_KEY: z.string().refine(
+    (v) => v !== "please-set-your-resend-api-key-here" && !/^please[-_]?set/.test(v),
+    { message: "RESEND_API_KEY must be set to a real key; the default placeholder is not allowed" }
+  ),
   RESEND_FROM_EMAIL: z.string().default("TaxHacker <user@localhost>"),
   RESEND_AUDIENCE_ID: z.string().default(""),
   STRIPE_SECRET_KEY: z.string().default(""),
@@ -24,6 +30,33 @@ const envSchema = z.object({
 })
 
 const env = envSchema.parse(Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== "")))
+
+if (env.SELF_HOSTED_MODE === "true" && !process.env.BETTER_AUTH_SECRET) {
+  // In self-hosted mode, generate a stable per-install secret so the default
+  // placeholder is never used to sign sessions or derive encryption keys.
+  // Operators who want to share sessions across replicas should still set
+  // BETTER_AUTH_SECRET explicitly in the environment.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const crypto = require("crypto") as typeof import("crypto")
+  const fs = require("fs") as typeof import("fs")
+  const path = require("path") as typeof import("path")
+  const secretFile = path.join(process.cwd(), "data", ".better-auth-secret")
+  let stored = ""
+  try {
+    stored = fs.readFileSync(secretFile, "utf8").trim()
+  } catch {
+    stored = crypto.randomBytes(48).toString("base64")
+    try {
+      fs.mkdirSync(path.dirname(secretFile), { recursive: true })
+      fs.writeFileSync(secretFile, stored, { mode: 0o600 })
+    } catch {
+      // If we cannot persist, fall back to an in-process secret. Sessions
+      // will not survive restarts but the service will still start.
+      stored = crypto.randomBytes(48).toString("base64")
+    }
+  }
+  ;(env as Record<string, unknown>).BETTER_AUTH_SECRET = stored
+}
 
 const config = {
   app: {

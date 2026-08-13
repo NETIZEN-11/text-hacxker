@@ -103,7 +103,18 @@ export async function restoreBackupAction(
       const userUploadsDirectory = getUserUploadsDirectory(user)
 
       for (const file of files) {
-        const filePathWithoutPrefix = path.normalize(file.path.replace(/^.*\/uploads\//, ""))
+        // Normalize the stored path. Strip any leading "/uploads/" or
+        // "data/uploads/" prefix regardless of platform separators.
+        const stripped = file.path
+          .replace(/^[\\/]+/, "")
+          .replace(/^(?:.*[\\/])?uploads[\\/]/, "")
+        const filePathWithoutPrefix = path.normalize(stripped)
+        // Reject UNC/extended-length prefixes that could bypass the
+        // startsWith(basePath) check on Windows.
+        if (/^\\\\\?\\/.test(filePathWithoutPrefix) || /^\/\?\//.test(filePathWithoutPrefix)) {
+          console.error(`Refusing to restore file with unsafe path: ${file.path}`)
+          continue
+        }
         const zipFilePath = path.join("data/uploads", filePathWithoutPrefix)
         const zipFile = zip.file(zipFilePath)
         if (!zipFile) {
@@ -113,7 +124,8 @@ export async function restoreBackupAction(
 
         const fileContents = await zipFile.async("nodebuffer")
         const fullFilePath = safePathJoin(userUploadsDirectory, filePathWithoutPrefix)
-        if (!fullFilePath.startsWith(path.normalize(userUploadsDirectory))) {
+        const normalizedBase = path.normalize(userUploadsDirectory)
+        if (!fullFilePath.startsWith(normalizedBase + path.sep) && fullFilePath !== normalizedBase) {
           console.error(`Attempted path traversal detected for file ${file.path}`)
           continue
         }
@@ -123,7 +135,7 @@ export async function restoreBackupAction(
           await fs.writeFile(fullFilePath, fileContents)
           restoredFilesCount++
         } catch (error) {
-          console.error(`Error writing file ${fullFilePath}:`, error)
+          console.error(`Error writing file ${fullFilePath}:`, error instanceof Error ? error.message : "unknown")
           continue
         }
 

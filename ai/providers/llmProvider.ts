@@ -4,6 +4,54 @@ import { ChatMistralAI } from "@langchain/mistralai"
 import { BaseMessage, HumanMessage } from "@langchain/core/messages"
 import type { AnalyzeAttachment } from "@/ai/attachments"
 
+// Block SSRF via the openai_compatible base URL: refuse localhost, link-local,
+// private, and loopback targets that would let a self-hosted instance probe
+// internal services (e.g. cloud metadata) on behalf of an attacker.
+function isSafeBaseUrl(raw: string | undefined): boolean {
+  if (!raw) return true
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return false
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return false
+  const host = url.hostname.toLowerCase()
+  if (host === "localhost" || host.endsWith(".localhost")) return false
+  if (host === "::1" || host === "[::1]") return false
+  // IPv4 loopback, private, link-local, broadcast, multicast, reserved.
+  if (/^127\./.test(host)) return false
+  if (/^10\./.test(host)) return false
+  if (/^192\.168\./.test(host)) return false
+  if (/^169\.254\./.test(host)) return false
+  if (/^0\./.test(host)) return false
+  if (/^172\.(1[6-9]|2[0-9]|3[01])\./.test(host)) return false
+  if (host === "metadata.google.internal" || host === "169.254.169.254") return false
+  return true
+}
+
+function assertSafeBaseUrl(raw: string | undefined) {
+  if (!isSafeBaseUrl(raw)) {
+    throw new Error(
+      "openai_compatible base URL must be a public http(s) host. Localhost, link-local, and private addresses are not allowed."
+    )
+  }
+}
+
+function safeJsonParse(text: string, maxBytes = 1_000_000): Record<string, unknown> {
+  // Cap the size to prevent DoS via a runaway model.
+  if (text.length > maxBytes) {
+    throw new Error(`LLM response exceeded ${maxBytes} bytes`)
+  }
+  // Strip ```json``` fences (best-effort, balanced).
+  const cleaned = text.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim()
+  const parsed = JSON.parse(cleaned)
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("LLM response is not a JSON object")
+  }
+  return parsed as Record<string, unknown>
+}
+
 export type LLMProvider = "openai" | "google" | "mistral" | "openai_compatible"
 
 export interface LLMConfig {
@@ -72,6 +120,7 @@ async function requestLLMUnified(config: LLMConfig, req: LLMRequest): Promise<LL
         temperature: temperature,
       })
     } else if (config.provider === "openai_compatible") {
+      assertSafeBaseUrl(config.baseUrl)
       model = new ChatOpenAI({
         apiKey: config.apiKey || "not-needed",
         model: config.model,
@@ -109,7 +158,7 @@ async function requestLLMUnified(config: LLMConfig, req: LLMRequest): Promise<LL
         : Array.isArray(rawContent.content)
           ? rawContent.content.map((c: { text?: string }) => c.text || "").join("")
           : ""
-      response = JSON.parse(text.replace(/```(?:json)?\s*/g, "").trim())
+      response = safeJsonParse(text)
     } else {
       const structuredModel = model.withStructuredOutput(req.schema!, { name: "transaction" })
       response = await structuredModel.invoke(messages) as Record<string, unknown>
@@ -172,6 +221,9 @@ export async function testLLMProvider(config: LLMConfig): Promise<LLMTestResult>
     } else if (config.provider === "mistral") {
       model = new ChatMistralAI({ apiKey: config.apiKey, model: config.model, temperature })
     } else if (config.provider === "openai_compatible") {
+      if (!isSafeBaseUrl(config.baseUrl)) {
+        return { success: false, supportsVision: false, message: "Refusing to call a non-public base URL" }
+      }
       model = new ChatOpenAI({
         apiKey: config.apiKey || "not-needed",
         model: config.model,

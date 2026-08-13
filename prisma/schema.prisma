@@ -236,3 +236,15 @@ model Progress {
   @@index([userId])
   @@map("progress")
 }
+
+// Tracks processed Stripe webhook event IDs for idempotency. Re-delivered
+// events are skipped to prevent double-applying plan changes.
+model WebhookEvent {
+  id          String   @id // stripe event id (e.g. evt_...)
+  type        String
+  receivedAt  DateTime @default(now()) @map("received_at")
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@index([type])
+  @@map("webhook_events")
+}
